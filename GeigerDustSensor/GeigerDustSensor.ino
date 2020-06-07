@@ -72,7 +72,7 @@ void taskMeasure(void *pArg) {            // cyclic measurement task 100ms
 
     auto events = event_counter;
     event_counter = 0;
-    //    sendData(events, actMeasureInterval, online);
+    sendGeiger(events, actMeasureInterval);
     actMeasureInterval = actMicros;
 
     if (setMeasureInterval == 0) {  // is no measure interval is set check periodically with 100ms
@@ -223,7 +223,6 @@ void loop() {
 
   actMillis = millis();
   if (actMillis - timer >= updateIntervall) {
-
     timer = actMillis;
   }
 
@@ -245,6 +244,7 @@ void loop() {
     case measure:
       PmResult pm = sds.queryPm();
       if (pm.isOk()) {
+        sendDust(pm.pm25,pm.pm10);
         Serial.print("PM2.5 = ");
         Serial.print(pm.pm25);
         Serial.print(", PM10 = ");
