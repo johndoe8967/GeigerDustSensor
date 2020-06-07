@@ -289,6 +289,13 @@ void sendHTTPRequest (String requestUrl) {
   }
 }
 
+String getStringTimeWithMS() {
+  String strTime = "";
+  strTime += DateTime.now();
+  strTime += "000";
+  return strTime;
+}
+
 void sendDust(float p25, float p10) {
   DateTime.toISOString();
 
@@ -303,9 +310,19 @@ void sendDust(float p25, float p10) {
   requestUrl += "&created_at=";
   requestUrl += DateTime.toISOString();
   sendHTTPRequest(requestUrl);
+
+  // Publish a message to "mytopic/test"
+  message = "{\"name\":\"GeigerDust\",\"field\":\"Dust\",\"p25\":";
+  message += p25;
+  message += ",\"p10\":";
+  message += p10;
+  message += ",\"time\":";
+  message += getStringTimeWithMS();
+  message += "}";
+  debugD("MQTT Publish: %s", message.c_str());
+  MQTTClient.publish("sensors", message); // You can activate the retain flag by setting the third parameter to true
+
 }
-
-
 
 #define doseRatio 120.0
 void sendGeiger(uint32 events, uint32 intervall) {
@@ -337,4 +354,17 @@ void sendGeiger(uint32 events, uint32 intervall) {
   requestUrl += "&created_at=";
   requestUrl += DateTime.toISOString();
   sendHTTPRequest(requestUrl);
+
+  
+  // Publish a message to "mytopic/test"
+  message = "{\"name\":\"GeigerDust\",\"field\":\"Geiger\",\"value\":";
+  message += dose;
+  message += ",\"CPM\":";
+  message += cpm;
+  message += ",\"time\":";
+  message += getStringTimeWithMS();
+  message += "}";
+  debugD("MQTT Publish: %s", message.c_str());
+  MQTTClient.publish("sensors", message); // You can activate the retain flag by setting the third parameter to true
+
 }
