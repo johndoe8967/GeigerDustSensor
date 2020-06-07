@@ -25,7 +25,7 @@
 #include "RemoteDebugCfg.h"
 #include <RemoteDebugger.h>
 #include <SdsDustSensor.h>
-#include "SettingCfg.h"
+#include "CredentialSetting.h"
 
 RemoteDebug Debug;
 
