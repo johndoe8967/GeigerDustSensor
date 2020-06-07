@@ -102,11 +102,6 @@ bool lastTimeValid = false;
 
 
 // MQTT client settings
-#define MQTTHostname "johndoe8967.no-ip.biz"
-#define MQTTPort 1883
-#define MQTTUser "iotMichael"
-#define MQTTPassword "M2$dXTcjpo0"
-#define MQTTClientName "CO2Sensor"
 EspMQTTClient MQTTClient(
   MQTTHostname,     // MQTT Broker server ip
   MQTTPort,         // The MQTT port, default to 1883. this line can be omitted
@@ -342,5 +337,4 @@ void sendGeiger(uint32 events, uint32 intervall) {
   requestUrl += "&created_at=";
   requestUrl += DateTime.toISOString();
   sendHTTPRequest(requestUrl);
-
 }
