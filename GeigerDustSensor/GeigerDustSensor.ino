@@ -26,6 +26,8 @@
 #include <RemoteDebug.h>
 #include "CredentialSetting.h"
 
+#define SWVersion "GeigerDust V1.0"
+
 RemoteDebug Debug;
 
 #define INT_PIN 0   // GPIO0 to detect radiation (has to be true at boot)
@@ -70,7 +72,7 @@ void taskMeasure(void *pArg) {            // cyclic measurement task 100ms
     debugV("Events: %ld ", event_counter);
     debugV("Interval: %ld\r\n", actInterval);
 
-    storeGeigerData(event_counter,actInterval);
+    storeGeigerData(event_counter, actInterval);
     event_counter = 0;
     actMeasureInterval = actMicros;
 
@@ -102,39 +104,60 @@ bool lastTimeValid = false;
 
 // MQTT client settings
 EspMQTTClient MQTTClient(
-  MQTTHostname,     // MQTT Broker server ip
-  MQTTPort,         // The MQTT port, default to 1883. this line can be omitted
-  MQTTUser,         // Can be omitted if not needed
-  MQTTPassword,     // Can be omitted if not needed
-  MQTTClientName    // Client name that uniquely identify your device
+  MQTTHostname,       // MQTT Broker server ip
+  MQTTPort,           // The MQTT port, default to 1883. this line can be omitted
+  MQTTUser,           // Can be omitted if not needed
+  MQTTPassword,       // Can be omitted if not needed
+  deviceName.c_str()  // Client name that uniquely identify your device
 );
 
 // This function is called once everything is connected (Wifi and MQTT)
 void onConnectionEstablished()
 {
-  // Subscribe to "mytopic/test" and display received message to Serial
-  MQTTClient.subscribe("GeigerDust/Update", [](const String & payload) {
+  MQTTClient.publish("device/online", deviceName.c_str());
+  MQTTClient.subscribe(deviceName.c_str(), [](const String & payload) {
     debugD("Received message: %s", payload.c_str());
 
-    const int capacity = JSON_OBJECT_SIZE(3) + 2 * JSON_OBJECT_SIZE(1);
-    StaticJsonDocument<capacity> doc;
-    DeserializationError err = deserializeJson(doc, payload);
-    if (err) {
-      debugD("deserializeJson() failed with code %s", err.c_str());
-    }
+    if (payload == "getCommands") {
+      debugD("Received get commands");
+      String commands = "{\"commands\":[{\"cmd\":\"Intervall\",\"type\":\"integer\",\"min\":60000,\"max\":3600000,\"value\":";
+      commands += sdsUpdateIntervall;
+      commands += "},{\"cmd\":\"Debug\",\"type\":\"bool\"}]}";
+      MQTTClient.publish((deviceName + "/commands").c_str(), commands);
+    } else if (payload == "info") {
+      debugD("Received info command");
+      String info = "{\"version\":\"";
+      info += SWVersion;
+      info += "\"}";
+      MQTTClient.publish("CO2Sensor/info", info);
+    } else {
+      const int capacity = JSON_OBJECT_SIZE(3) + 2 * JSON_OBJECT_SIZE(1);
+      StaticJsonDocument<capacity> doc;
+      DeserializationError err = deserializeJson(doc, payload);
+      if (err) {
+        debugE("deserializeJson() failed with code %s", err.c_str());
+      }
 
-    if (doc.containsKey("SDSIntervall")) {
-      auto receivedVal = doc["Intervall"].as<unsigned long>();
-      debugD("Received Intervall: %lu", receivedVal);
-      if ((receivedVal > 60000) && (receivedVal < 3600000)) {
-        sdsUpdateIntervall = receivedVal;
+      if (doc.containsKey("Intervall")) {
+        auto receivedVal = doc["Intervall"].as<unsigned long>();
+        debugD("Received Intervall: %lu", receivedVal);
+        if ((receivedVal >= 60000) && (receivedVal < 3600000)) {
+          sdsUpdateIntervall = receivedVal;
+        }
+      }
+      if (doc.containsKey("Debug")) {
+        debugD("Received Debug");
       }
     }
-    if (doc.containsKey("Debug")) {
-      MQTTClient.enableDebuggingMessages(doc["Debug"].as<bool>());
-      debugD("Received MQTTDebug over Serial");
+  });
+
+  MQTTClient.subscribe("device", [](const String & payload) {
+    if (payload == "scan") {
+      debugD("Received device scan");
+      MQTTClient.publish("device/scan", deviceName.c_str());
     }
   });
+
 
   DateTime.setTimeZone(DateTimeClass::TIMEZONE_UTC);
   DateTime.setServer("0.at.pool.ntp.org");
@@ -214,7 +237,7 @@ void setup() {
 }
 
 bool sendGeigerValid = false;
-void storeGeigerData(uint32 event_counter,uint32 actInterval) {
+void storeGeigerData(uint32 event_counter, uint32 actInterval) {
   events = event_counter;
   measureInterval = actInterval;
   sendGeigerValid = true;
@@ -232,7 +255,7 @@ void loop() {
 
   actMillis = millis();
 
-  if(sendGeigerValid) {
+  if (sendGeigerValid) {
     sendGeiger(events, measureInterval);
     sendGeigerValid = false;
   }
@@ -259,12 +282,12 @@ void loop() {
       PmResult pm = sds.queryPm();
       if (pm.isOk()) {
         debugV("SDS Send");
-        sendDust(pm.pm25,pm.pm10);
+        sendDust(pm.pm25, pm.pm10);
         debugD("PM2.5 = %f", pm.pm25);
         debugD("PM1.0 = %f", pm.pm10);
 
       } else {
-        debugE("SDS Error: %s",pm.statusToString().c_str());
+        debugE("SDS Error: %s", pm.statusToString().c_str());
       }
       WorkingStateResult state = sds.sleep();
       if (state.isWorking()) {
@@ -281,14 +304,13 @@ void loop() {
 
 void sendHTTPRequest (String requestUrl) {
   WiFiClient client;
-  debugD("HTTPReq: %s",requestUrl.c_str());
+  debugD("HTTPReq: %s", requestUrl.c_str());
   if (thingSpeakDustClient.begin(client, requestUrl.c_str())) {  // HTTP
     int httpCode = thingSpeakDustClient.GET();        // start connection and send HTTP header
     if (httpCode > 0) { // httpCode is positiv on success
       // HTTP header has been send and Server response header has been handled
       if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
         String payload = thingSpeakDustClient.getString();
-//        Serial.println(payload);
         debugD("%s", payload.c_str());
       }
     } else {
@@ -311,7 +333,7 @@ void sendDust(float p25, float p10) {
   if (!DateTime.isTimeValid()) {
     return;
   }
-  
+
   String requestUrl;
   requestUrl = ThingSpeakHost;
   requestUrl += "/update?key=";
@@ -348,7 +370,7 @@ void sendGeiger(uint32 events, uint32 intervall) {
   requestUrl = RadmonHost;
   requestUrl += "/radmon.php?function=submit&user=";
   requestUrl += RadMonUser;
-  debugD("User: %s",RadMonUser);
+  debugD("User: %s", RadMonUser);
   requestUrl += "&password=";
   requestUrl += RadMonPwd;
   requestUrl += "&value=";
@@ -369,7 +391,7 @@ void sendGeiger(uint32 events, uint32 intervall) {
   requestUrl += DateTime.toISOString();
   sendHTTPRequest(requestUrl);
 
-  
+
   // Publish a message to "mytopic/test"
   message = "{\"name\":\"GeigerDust\",\"field\":\"Geiger\",\"dose\":";
   message += dose;
