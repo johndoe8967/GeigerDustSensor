@@ -23,8 +23,7 @@
 #include "EspMQTTClient.h"
 #include <ArduinoJson.h>
 #include "RemoteDebugCfg.h"
-#include <RemoteDebugger.h>
-#include <SdsDustSensor.h>
+#include <RemoteDebug.h>
 #include "CredentialSetting.h"
 
 RemoteDebug Debug;
