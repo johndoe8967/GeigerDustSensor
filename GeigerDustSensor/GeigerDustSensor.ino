@@ -43,6 +43,8 @@ HTTPClient thingSpeakGeigerClient;
 #ifdef geiger
 //Geiger Counter Variables
 uint32 event_counter;
+uint32 events = 0;
+uint32 measureInterval = 0;
 uint32 actMeasureInterval = 0;        // last measure intervall in us
 uint32 setMeasureInterval = 60000000;   // set value for measure intervall in us
 float doseRatio;
@@ -64,19 +66,19 @@ void taskMeasure(void *pArg) {            // cyclic measurement task 100ms
   }
 
   if (stopMeasure) {
-    actMeasureInterval = actInterval;
     // send Measurement
-    Debug.printf("Events: %ld ", event_counter);
-    Debug.printf("Interfall: %ld\r\n", actMeasureInterval);
+    debugV("Events: %ld ", event_counter);
+    debugV("Interval: %ld\r\n", actInterval);
 
-    auto events = event_counter;
+    storeGeigerData(event_counter,actInterval);
     event_counter = 0;
-    sendGeiger(events, actMeasureInterval);
     actMeasureInterval = actMicros;
 
     if (setMeasureInterval == 0) {  // is no measure interval is set check periodically with 100ms
+      debugV("100ms measureinterval");
       os_timer_arm(&measureTimer, 100, false);
     } else {
+      debugV("set next measureinterval");
       os_timer_arm(&measureTimer, (setMeasureInterval - (micros() - actMicros)) / 1000, false);
     }
   }
@@ -91,10 +93,8 @@ void ICACHE_RAM_ATTR interruptHandler()
 
 bool connected = false;
 unsigned long actMillis = 0;
-unsigned long timer = 0;
-unsigned long updateIntervall = 10000;
 unsigned long sdsTimer = 0;
-unsigned long sdsUpdateIntervall = 0;
+unsigned long sdsUpdateIntervall = 600000;
 String message;
 bool timeValid = false;
 bool lastTimeValid = false;
@@ -123,11 +123,11 @@ void onConnectionEstablished()
       debugD("deserializeJson() failed with code %s", err.c_str());
     }
 
-    if (doc.containsKey("Intervall")) {
+    if (doc.containsKey("SDSIntervall")) {
       auto receivedVal = doc["Intervall"].as<unsigned long>();
       debugD("Received Intervall: %lu", receivedVal);
-      if ((receivedVal > 1000) && (receivedVal < 3600000)) {
-        updateIntervall = receivedVal;
+      if ((receivedVal > 60000) && (receivedVal < 3600000)) {
+        sdsUpdateIntervall = receivedVal;
       }
     }
     if (doc.containsKey("Debug")) {
@@ -137,23 +137,25 @@ void onConnectionEstablished()
   });
 
   DateTime.setTimeZone(DateTimeClass::TIMEZONE_UTC);
-  DateTime.setServer("pool.ntp.org");
+  DateTime.setServer("0.at.pool.ntp.org");
   // this method config ntp and wait for time sync
   // default timeout is 10 seconds
   DateTime.begin(/* timeout param */);
   if (!DateTime.isTimeValid()) {
-    Serial.println("Failed to get time from server.");
+    debugE("Failed to get time from server.");
   }
 
   sds.begin(); // this line will begin Serial1 with given baud rate (9600 by default)
-  Serial.println(sds.queryFirmwareVersion().toString()); // prints firmware version
-  Serial.println(sds.setQueryReportingMode().toString()); // ensures sensor is in 'query' reporting mode
+  debugD("SDS Version: %s", sds.queryFirmwareVersion().toString().c_str()); // prints firmware version
+  debugD("SDS Mode: %s", sds.setQueryReportingMode().toString().c_str()); // ensures sensor is in 'query' reporting mode
 
 
+#ifdef geiger
   attachInterrupt(INT_PIN, interruptHandler, RISING);
 
   os_timer_setfn(&measureTimer, taskMeasure, NULL);
   os_timer_arm(&measureTimer, 100, true);
+#endif
 
   connected = true;
 }
@@ -169,7 +171,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Booting");
 
-  Debug.begin("CO2Sensor.local");
+  Debug.begin("GeigerDust.local");
 
   //configure pin0
   pinMode(MODE_PIN, INPUT_PULLUP);
@@ -204,7 +206,6 @@ void setup() {
   }
 
   Serial.println("");
-  Serial.println("");
 
   WiFi.printDiag(Serial);
 
@@ -212,54 +213,64 @@ void setup() {
   Serial.println(WiFi.localIP());
 }
 
-
+bool sendGeigerValid = false;
+void storeGeigerData(uint32 event_counter,uint32 actInterval) {
+  events = event_counter;
+  measureInterval = actInterval;
+  sendGeigerValid = true;
+}
 
 void loop() {
   Debug.handle();
   MQTTClient.loop();
 
+  if (!DateTime.isTimeValid()) {
+    debugE("Failed to get time from server.");
+    DateTime.begin(/* timeout param */);
+  }
 
 
   actMillis = millis();
-  if (actMillis - timer >= updateIntervall) {
-    timer = actMillis;
+
+  if(sendGeigerValid) {
+    sendGeiger(events, measureInterval);
+    sendGeigerValid = false;
   }
 
   switch (sdsStates) {
     case sleeping:
       if (actMillis - sdsTimer >= sdsUpdateIntervall) {
         sdsStates = wakeup;
+        debugV("SDS Wakeup");
       }
       break;
     case wakeup:
       sds.wakeup();
       sdsStates = heating;
+      debugV("SDS Heating");
       break;
     case heating:
       if (actMillis - (sdsTimer + 30000) >= sdsUpdateIntervall) {
         sdsStates = measure;
+        debugV("SDS Measure");
       }
       break;
     case measure:
       PmResult pm = sds.queryPm();
       if (pm.isOk()) {
+        debugV("SDS Send");
         sendDust(pm.pm25,pm.pm10);
-        Serial.print("PM2.5 = ");
-        Serial.print(pm.pm25);
-        Serial.print(", PM10 = ");
-        Serial.println(pm.pm10);
+        debugD("PM2.5 = %f", pm.pm25);
+        debugD("PM1.0 = %f", pm.pm10);
 
-        // if you want to just print the measured values, you can use toString() method as well
-        Serial.println(pm.toString());
       } else {
-        Serial.print("Could not read values from sensor, reason: ");
-        Serial.println(pm.statusToString());
+        debugE("SDS Error: %s",pm.statusToString().c_str());
       }
       WorkingStateResult state = sds.sleep();
       if (state.isWorking()) {
-        Serial.println("Problem with sleeping the sensor.");
+        debugE("SDS Error: sleeping");
       } else {
-        Serial.println("Sensor is sleeping");
+        debugV("SDS Sleep");
         sdsTimer = actMillis;
         sdsStates = sleeping;
       }
@@ -270,21 +281,22 @@ void loop() {
 
 void sendHTTPRequest (String requestUrl) {
   WiFiClient client;
-
+  debugD("HTTPReq: %s",requestUrl.c_str());
   if (thingSpeakDustClient.begin(client, requestUrl.c_str())) {  // HTTP
     int httpCode = thingSpeakDustClient.GET();        // start connection and send HTTP header
     if (httpCode > 0) { // httpCode is positiv on success
       // HTTP header has been send and Server response header has been handled
       if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
         String payload = thingSpeakDustClient.getString();
-        Serial.println(payload);
+//        Serial.println(payload);
+        debugD("%s", payload.c_str());
       }
     } else {
-      Serial.printf("[HTTP] GET... failed, error: %s\n", thingSpeakDustClient.errorToString(httpCode).c_str());
+      debugE("[HTTP] GET... failed, error: %s\n", thingSpeakDustClient.errorToString(httpCode).c_str());
     }
     thingSpeakDustClient.end();
   } else {
-    Serial.printf("[HTTP} Unable to connect\n");
+    debugE("[HTTP] Unable to connect\n");
   }
 }
 
@@ -296,8 +308,10 @@ String getStringTimeWithMS() {
 }
 
 void sendDust(float p25, float p10) {
-  DateTime.toISOString();
-
+  if (!DateTime.isTimeValid()) {
+    return;
+  }
+  
   String requestUrl;
   requestUrl = ThingSpeakHost;
   requestUrl += "/update?key=";
@@ -334,10 +348,11 @@ void sendGeiger(uint32 events, uint32 intervall) {
   requestUrl = RadmonHost;
   requestUrl += "/radmon.php?function=submit&user=";
   requestUrl += RadMonUser;
+  debugD("User: %s",RadMonUser);
   requestUrl += "&password=";
-  requestUrl += RadMonPWd;
+  requestUrl += RadMonPwd;
   requestUrl += "&value=";
-  requestUrl += cpm;
+  requestUrl += (int)cpm;
   requestUrl += "&unit=CPM";
   sendHTTPRequest(requestUrl);
 
@@ -356,7 +371,7 @@ void sendGeiger(uint32 events, uint32 intervall) {
 
   
   // Publish a message to "mytopic/test"
-  message = "{\"name\":\"GeigerDust\",\"field\":\"Geiger\",\"value\":";
+  message = "{\"name\":\"GeigerDust\",\"field\":\"Geiger\",\"dose\":";
   message += dose;
   message += ",\"CPM\":";
   message += cpm;
