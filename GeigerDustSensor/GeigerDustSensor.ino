@@ -40,6 +40,7 @@ String RadmonHost = "http://radmon.org";     // no need to change this
 String ThingSpeakHost = "http://api.thingspeak.com";
 HTTPClient thingSpeakDustClient;
 HTTPClient thingSpeakGeigerClient;
+String deviceName = "GeigerDust";
 
 #define geiger
 #ifdef geiger
