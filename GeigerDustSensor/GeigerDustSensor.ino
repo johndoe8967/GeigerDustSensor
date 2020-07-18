@@ -200,13 +200,13 @@ void setup() {
   pinMode(MODE_PIN, INPUT_PULLUP);
 
   // deplay for 2 sec for smartConfig
-  Serial.println("2 sec before clear SmartConfig");
+//  Serial.println("2 sec before clear SmartConfig");
   delay(2000);
 
   // read pullup
   int isSmartConfig = digitalRead(MODE_PIN);
   if (isSmartConfig == 0) {
-    Serial.println("clear config");
+//    Serial.println("clear config");
     // reset default config
     WiFi.disconnect();
 
@@ -215,25 +215,25 @@ void setup() {
   // if wifi cannot connect start smartconfig
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+//    Serial.print(".");
     if (cnt++ >= 15) {
       WiFi.beginSmartConfig();
       while (1) {
         delay(500);
         if (WiFi.smartConfigDone()) {
-          Serial.println("SmartConfig Success");
+//          Serial.println("SmartConfig Success");
           break;
         }
       }
     }
   }
 
-  Serial.println("");
+//  Serial.println("");
 
   WiFi.printDiag(Serial);
 
   // Print the IP address
-  Serial.println(WiFi.localIP());
+//  Serial.println(WiFi.localIP());
 }
 
 bool sendGeigerValid = false;
@@ -312,6 +312,8 @@ void sendHTTPRequest (String requestUrl) {
       if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
         String payload = thingSpeakDustClient.getString();
         debugD("%s", payload.c_str());
+      } else {
+        debugD("[HTTP] Return: %u",httpCode);
       }
     } else {
       debugE("[HTTP] GET... failed, error: %s\n", thingSpeakDustClient.errorToString(httpCode).c_str());
@@ -370,7 +372,6 @@ void sendGeiger(uint32 events, uint32 intervall) {
   requestUrl = RadmonHost;
   requestUrl += "/radmon.php?function=submit&user=";
   requestUrl += RadMonUser;
-  debugD("User: %s", RadMonUser);
   requestUrl += "&password=";
   requestUrl += RadMonPwd;
   requestUrl += "&value=";
